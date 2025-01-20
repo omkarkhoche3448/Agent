@@ -313,31 +313,25 @@
 
 
 
+
 import express from 'express';
 import pkg from '@slack/bolt';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import multer from 'multer';
 import mongoose from 'mongoose';
-import { pipeline } from 'stream/promises';
-import { createWriteStream } from 'fs';
 import { readFile, unlink, mkdir } from 'fs/promises';
-import path from 'path';
+import fetch from 'node-fetch';
 
-
-import pdfjs from 'pdfjs-dist/build/pdf.js';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.js';
+import * as pdfjs from 'pdfjs-dist';
 
 dotenv.config();
 
 const { App } = pkg;
 const app = express();
 
-
-// Set up pdfjs worker
-pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
-
-
+// Set up pdfjs worker from a CDN
+pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js';
 
 // Middleware
 app.use(cors());
@@ -399,6 +393,28 @@ const DocumentSchema = new mongoose.Schema({
 
 const Document = mongoose.model('Document', DocumentSchema);
 
+// Ollama integration function
+async function queryOllama(question, context) {
+  try {
+    const response = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: "llama2", // or any other model you have pulled in Ollama
+        prompt: `Given the following context about financial documents, please answer this question: ${question}\n\nContext: ${context}\n\nOnly answer based on the information provided in the context. If the information is not in the context, say "I cannot answer this question based on the available information."`,
+        stream: false
+      })
+    });
+
+    const data = await response.json();
+    return data.response;
+  } catch (error) {
+    console.error('Error querying Ollama:', error);
+    return 'Sorry, I encountered an error processing your request.';
+  }
+}
 // Helper function to process PDF
 async function processPDFInChunks(filePath, documentId) {
   try {
@@ -408,16 +424,12 @@ async function processPDFInChunks(filePath, documentId) {
     doc.metadata.processingStatus = 'processing';
     await doc.save();
 
-    // Read the PDF file
     const dataBuffer = await readFile(filePath);
-    
-    // Load PDF document using pdf.js
     const loadingTask = pdfjs.getDocument({ data: dataBuffer });
     const pdfDoc = await loadingTask.promise;
     const numPages = pdfDoc.numPages;
     let textContent = '';
 
-    // Process each page
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       const page = await pdfDoc.getPage(pageNum);
       const content = await page.getTextContent();
@@ -425,27 +437,17 @@ async function processPDFInChunks(filePath, documentId) {
       
       textContent += `Page ${pageNum}:\n${pageText}\n\n`;
       
-      // Update progress
       doc.metadata.processingProgress = Math.round((pageNum / numPages) * 100);
       await doc.save();
-
-      // Give the event loop a chance to handle other requests
-      await new Promise(resolve => setTimeout(resolve, 0));
     }
 
-    // Update document with extracted text
     doc.content = textContent;
     doc.metadata.processingStatus = 'completed';
     doc.metadata.processingProgress = 100;
     doc.metadata.pageCount = numPages;
     await doc.save();
 
-    // Clean up the temporary file
-    try {
-      await unlink(filePath);
-    } catch (error) {
-      console.error('Error deleting temporary file:', error);
-    }
+    await unlink(filePath);
 
   } catch (error) {
     console.error('PDF processing error:', error);
@@ -477,7 +479,6 @@ app.post('/api/upload', upload.single('pdf'), async (req, res, next) => {
 
     await document.save();
 
-    // Start processing in the background
     processPDFInChunks(req.file.path, document._id).catch(async (error) => {
       console.error('PDF processing error:', error);
       await Document.findByIdAndUpdate(document._id, {
@@ -496,6 +497,56 @@ app.post('/api/upload', upload.single('pdf'), async (req, res, next) => {
   }
 });
 
+// Get document statistics
+app.get('/api/stats', async (req, res, next) => {
+  try {
+    const stats = await Document.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalDocuments: { $sum: 1 },
+          completedDocuments: {
+            $sum: {
+              $cond: [{ $eq: ["$metadata.processingStatus", "completed"] }, 1, 0]
+            }
+          },
+          totalPages: { $sum: "$metadata.pageCount" },
+          averageFileSize: { $avg: "$metadata.fileSize" }
+        }
+      }
+    ]);
+
+    res.json(stats[0] || {
+      totalDocuments: 0,
+      completedDocuments: 0,
+      totalPages: 0,
+      averageFileSize: 0
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Search documents
+app.get('/api/search', async (req, res, next) => {
+  try {
+    const { query } = req.query;
+    if (!query) {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+
+    const results = await Document.find(
+      { content: { $regex: query, $options: 'i' } },
+      { filename: 1, content: 1, uploadDate: 1 }
+    );
+
+    res.json(results);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Standard CRUD endpoints
 app.get('/api/documents/:id/status', async (req, res, next) => {
   try {
     const document = await Document.findById(req.params.id, {
@@ -570,14 +621,20 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_SIGNING_SECRET && process.e
   slackBot.message(async ({ message, say }) => {
     try {
       const documents = await Document.find({});
-      const combinedContent = documents.map(doc => doc.content).join(' ');
-      await say(`Received your message: ${message.text}`);
+      const context = documents.map(doc => doc.content).join('\n\n');
+      
+      if (!context) {
+        await say("I don't have any documents in my knowledge base yet. Please upload some PDF documents first.");
+        return;
+      }
+  
+      const response = await queryOllama(message.text, context);
+      await say(response);
     } catch (error) {
       console.error('Error processing message:', error);
       await say('Sorry, I encountered an error processing your request.');
     }
   });
-
   (async () => {
     try {
       await slackBot.start();
