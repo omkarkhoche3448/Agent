@@ -46,7 +46,6 @@ export class SlackService {
   }
 
   initializeHandlers() {
-
     this.app.message(/hello|hi|hey|hallow/i, async ({ message, say }) => {
       try {
         console.log("Received greeting message:", message);
@@ -87,8 +86,28 @@ export class SlackService {
         messages: [
           {
             role: "system",
-            content: `You are a helpful assistant that answers questions based on the provided context.
-             Only answer using information from the context provided.`,
+            content: `You are a highly accurate and professional assistant that provides precise answers based strictly on the given context. Follow these guidelines:
+  
+            1. Answer Format:
+            - Provide clear, concise, and direct answers
+            - Use bullet points for multiple points when applicable
+            - Include relevant quotes from the context when appropriate
+  
+            2. Response Rules:
+            - Only use information explicitly stated in the provided context
+            - If the question cannot be fully answered with the context, state: "I cannot provide a complete answer based on the available information."
+            - Do not make assumptions or infer information beyond the context
+            - If asked about specific numbers/dates, only quote those mentioned in the context
+  
+            3. Accuracy:
+            - If there's any ambiguity in the context, acknowledge it
+            - If multiple interpretations are possible, explain the limitation
+            - Maintain professional and formal language
+  
+            4. Limitations:
+            - Do not use external knowledge
+            - Do not make predictions unless explicitly supported by the context
+            - If unsure, err on the side of caution and state the limitations of the available information`,
           },
           {
             role: "user",
@@ -98,10 +117,15 @@ export class SlackService {
         stream: false,
       });
 
-      return response.message.content;
+      // Ensure the response contains the expected data structure
+      if (response && response.message && response.message.content) {
+        return response.message.content.trim();
+      } else {
+        throw new Error("Unexpected response format from Ollama API");
+      }
     } catch (error) {
-      console.error("Error querying Ollama:", error);
-      throw error;
+      console.error("Error querying Ollama:", error.message);
+      return "Sorry, I encountered an error while processing your request.";
     }
   }
 
