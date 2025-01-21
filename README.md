@@ -2,8 +2,6 @@ Here's a concise and complete README for your project:
 
 ---
 
-# Project Name
-
 A platform for interacting with documents and a Slack bot powered by AI, using **MongoDB** for document storage and **Ollama** for generating responses.
 
 ---
