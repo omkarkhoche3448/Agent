@@ -9,30 +9,53 @@ function App() {
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
-
+  
     setMessages((prev) => [...prev, { text: inputMessage, isBot: false }]);
     setInputMessage("");
-
+    setLoading(true);
+  
     try {
       const response = await fetch("http://localhost:3000/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message: inputMessage }),
+        body: JSON.stringify({ 
+          message: inputMessage,
+          requiresContext: true  // Add this flag
+        }),
       });
-
+  
       const data = await response.json();
-      setMessages((prev) => [...prev, { text: data.response, isBot: true }]);
+      console.log("Response from Ollama:", data); // Debug response
+  
+      setMessages((prev) => [
+        ...prev, 
+        { 
+          text: data.response, 
+          isBot: true,
+          source: data.source || null // If you're returning source information
+        }
+      ]);
     } catch (error) {
       console.error("Error sending message:", error);
       setMessages((prev) => [
         ...prev,
         {
-          text: "Sorry, there was an error processing your message",
+          text: "Sorry, there was an error processing your message. Please try again.",
           isBot: true,
+          error: true
         },
       ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
     }
   };
 
@@ -154,7 +177,7 @@ function App() {
                     type="text"
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
+                    onKeyPress={handleKeyPress}
                     className="flex-1 p-2 border rounded-lg"
                     placeholder="Type your message..."
                   />
