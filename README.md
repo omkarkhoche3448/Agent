@@ -1,118 +1,123 @@
-Here's a concise and complete README for your project:
+
+# AI-Powered Slack Bot and Document Interaction Platform  
+
+A platform that integrates AI-powered Slack bot functionalities and document management, leveraging **MongoDB** for storage and **Ollama** for AI-generated responses.  
 
 ---
 
-A platform for interacting with documents and a Slack bot powered by AI, using **MongoDB** for document storage and **Ollama** for generating responses.
+## Features  
+
+- **Slack Bot Integration**: AI-powered chatbot integrated with Slack channels to answer queries.  
+- **Document Management**: Upload and query documents (PDFs) for AI-generated responses.  
+- **Real-Time Chat**: Query documents and retrieve insights instantly.  
+- **File Uploads**: Enhance bot knowledge with document uploads.  
 
 ---
 
-## Features
+## System Requirements  
 
-- **Slack Bot Integration**: Listens for user queries and responds with AI-generated answers based on documents.
-- **Document Management**: Upload, store, and query documents (PDFs).
-- **Real-Time Chat**: Users can query documents through the bot for quick responses.
-- **File Uploads**: Upload documents to enrich the bot’s knowledge base.
-
----
-
-## System Requirements
-
-- **Ollama** (installed locally)
-- **MongoDB** (or MongoDB Atlas)
+- **Ollama** (installed locally on Windows or Mac)  
+- **MongoDB** (local or MongoDB Atlas)  
+- **Slack Workspace**  
 
 ---
 
-## Setup Instructions
+## Setup Instructions  
 
-### 1. Clone the repository
+### 1. Clone the Repository  
 
-```bash
-git clone https://github.com/omkarkhoche3448/Agent.git
-```
+```bash  
+git clone https://github.com/omkarkhoche3448/Agent.git  
+```  
 
-### 2. Frontend Setup
+### 2. Frontend Setup  
 
-1. Navigate to the `frontend` folder:
-   ```bash
-   cd frontend
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Run the frontend:
-   ```bash
-   npm run dev
-   ```
+1. Navigate to the `frontend` directory:  
+   ```bash  
+   cd frontend  
+   ```  
+2. Install dependencies:  
+   ```bash  
+   npm install  
+   ```  
+3. Start the frontend:  
+   ```bash  
+   npm run dev  
+   ```  
 
-### 3. Server Setup
+### 3. Server Setup  
 
-1. Navigate to the `server` folder:
-   ```bash
-   cd server
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Run the server:
-   ```bash
-   npm run dev
-   ```
+1. Navigate to the `server` directory:  
+   ```bash  
+   cd server  
+   ```  
+2. Install dependencies:  
+   ```bash  
+   npm install  
+   ```  
+3. Start the server:  
+   ```bash  
+   npm run dev  
+   ```  
 
-### 4. Start Ollama
+### 4. Configure and Start Ollama  
 
-- Ensure **Ollama** is installed and running locally on your machine (either Windows or Mac).
-
----
-
-## Environment Variables
-
-Create a `.env` file in the root of both `frontend` and `server` directories and include the following:
-
-```
-MONGODB_URI='mongodb://localhost:27017/your-database-name'
-SLACK_BOT_TOKEN='xoxb-your-slack-bot-token'
-SLACK_SIGNING_SECRET='your-slack-signing-secret'
-SLACK_APP_TOKEN='xapp-your-slack-app-token'
-PORT=3000
-
-```
+- Install and run **Ollama** locally (Windows or Mac).  
 
 ---
 
-## Routes and Functionalities
+## Slack Bot Configuration  
 
-### Backend Routes
+1. **Create a Slack Workspace**:  
+   - Sign up or log in to Slack at [Slack](https://slack.com).  
 
-1. **`/api/documents`**:
-   - **GET**: Retrieves all documents.
-   - **POST**: Upload a new document.
+2. **Create a Slack App**:  
+   - Go to [Slack API](https://api.slack.com/apps) and create a new app.  
+   - Set the app type to "bot" and configure the scopes needed (e.g., `chat:write`, `channels:read`, etc.).  
 
-2. **`/api/upload`**:
-   - **POST**: Upload PDF documents.
+3. **Add the App to a Channel**:  
+   - Install the app in your workspace and add it to a Slack channel.  
 
-3. **`/api/chat`**:
-   - **POST**: Query chat message and retrieve AI-generated response based on documents.
-
-### Slack Bot Features
-
-- **Real-Time Messaging**: Responds to user queries with AI-driven content from uploaded documents.
-- **Bot Initialization**: Initialized with the Slack OAuth token.
+4. **Configure Environment Variables**:  
+   - Copy the bot tokens (`SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_APP_TOKEN`) into your `.env` file.  
 
 ---
 
-## Notes
+## Environment Variables  
 
-- Ensure **Ollama** is running locally before using the chat features.
-- The Slack bot is initialized only if the **SLACK_OAUTH_TOKEN** is available in the environment.
+Create a `.env` file in the `server` directory with the following:  
+
+```  
+MONGODB_URI='mongodb+srv://your-mongodb-connection'  
+SLACK_BOT_TOKEN='xoxb-your-slack-bot-token'  
+SLACK_SIGNING_SECRET='your-slack-signing-secret'  
+SLACK_APP_TOKEN='xapp-your-slack-app-token'  
+PORT=3000  
+```  
 
 ---
 
-## License
+## API Routes  
 
-This project is licensed under the MIT License.
+### Backend  
 
---- 
+1. **`/api/documents`**:  
+   - **GET**: Retrieve all documents.  
+   - **POST**: Upload a document.  
 
-This concise README covers project setup, functionality, and usage in a streamlined format. Let me know if you'd like any more changes!
+2. **`/api/upload`**:  
+   - **POST**: Upload PDF documents.  
+
+3. **`/api/chat`**:  
+   - **POST**: Query and retrieve AI-generated responses from documents.  
+
+---
+
+## Notes  
+
+- Ensure **Ollama** is running locally before querying.  
+- Add the Slack bot to the desired channel after setup.  
+- The Slack bot initializes only if the `SLACK_BOT_TOKEN` is configured.  
+
+---
+
