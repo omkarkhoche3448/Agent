@@ -1,352 +1,149 @@
 import express from 'express';
-import pkg from '@slack/bolt';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import multer from 'multer';
-import mongoose from 'mongoose';
-import { readFile, unlink, mkdir } from 'fs/promises';
-import fetch from 'node-fetch';
-
-import * as pdfjs from 'pdfjs-dist';
+import { connectDB } from './config/database.js';
+import documentRoutes from './routes/documentRoutes.js';
+import uploadRoutes from './routes/uploadRoutes.js';
+import errorHandler from './middleware/errorHandler.js';
+import { SlackService } from './services/slackService.js';
+import { createUploadsDirectory } from './middleware/upload.js';
+import Document from "./models/Document.js";
+import ollama from 'ollama';
+import dns from 'dns';
 
 dotenv.config();
 
-const { App } = pkg;
-const app = express();
+// Set Google DNS servers
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
-// Set up pdfjs worker from a CDN
-pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js';
+const app = express();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// Configure multer for PDF uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
-});
-
-const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF files are allowed'));
-    }
-  }
-});
+const PORT = process.env.PORT || 3000;
 
 // Create uploads directory
-try {
-  await mkdir('uploads', { recursive: true });
-} catch (err) {
-  if (err.code !== 'EEXIST') {
-    console.error('Error creating uploads directory:', err);
-  }
-}
+createUploadsDirectory();
 
-// MongoDB Schema
-const DocumentSchema = new mongoose.Schema({
-  content: { type: String, default: '' },
-  filename: { type: String, required: true },
-  uploadDate: { type: Date, default: Date.now },
-  metadata: {
-    pageCount: Number,
-    fileSize: Number,
-    processingStatus: {
-      type: String,
-      enum: ['pending', 'processing', 'completed', 'error'],
-      default: 'pending'
-    },
-    processingProgress: {
-      type: Number,
-      min: 0,
-      max: 100,
-      default: 0
-    },
-    error: String
-  }
-});
+// Routes
+app.use('/api/documents', documentRoutes);
+app.use('/api/upload', uploadRoutes);
 
-const Document = mongoose.model('Document', DocumentSchema);
-
-// Ollama integration function
+// Ollama query helper function
 async function queryOllama(question, context) {
   try {
-    const response = await fetch('http://localhost:11434/api/generate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: "llama2", // or any other model you have pulled in Ollama
-        prompt: `Given the following context about financial documents, please answer this question: ${question}\n\nContext: ${context}\n\nOnly answer based on the information provided in the context. If the information is not in the context, say "I cannot answer this question based on the available information."`,
-        stream: false
-      })
+    const response = await ollama.chat({
+      model: 'llama2',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a helpful assistant that answers questions based on the provided context. Only answer using information from the context provided. If the information is not in the context, say "I cannot answer this question based on the available information."`
+        },
+        {
+          role: 'user',
+          content: `Context: ${context}\n\nQuestion: ${question}`
+        }
+      ],
+      stream: false
     });
 
-    const data = await response.json();
-    return data.response;
+    return response.message.content;
   } catch (error) {
     console.error('Error querying Ollama:', error);
-    return 'Sorry, I encountered an error processing your request.';
-  }
-}
-// Helper function to process PDF
-async function processPDFInChunks(filePath, documentId) {
-  try {
-    const doc = await Document.findById(documentId);
-    if (!doc) throw new Error('Document not found');
-
-    doc.metadata.processingStatus = 'processing';
-    await doc.save();
-
-    const dataBuffer = await readFile(filePath);
-    const loadingTask = pdfjs.getDocument({ data: dataBuffer });
-    const pdfDoc = await loadingTask.promise;
-    const numPages = pdfDoc.numPages;
-    let textContent = '';
-
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-      const page = await pdfDoc.getPage(pageNum);
-      const content = await page.getTextContent();
-      const pageText = content.items.map(item => item.str).join(' ');
-      
-      textContent += `Page ${pageNum}:\n${pageText}\n\n`;
-      
-      doc.metadata.processingProgress = Math.round((pageNum / numPages) * 100);
-      await doc.save();
-    }
-
-    doc.content = textContent;
-    doc.metadata.processingStatus = 'completed';
-    doc.metadata.processingProgress = 100;
-    doc.metadata.pageCount = numPages;
-    await doc.save();
-
-    await unlink(filePath);
-
-  } catch (error) {
-    console.error('PDF processing error:', error);
-    const doc = await Document.findById(documentId);
-    if (doc) {
-      doc.metadata.processingStatus = 'error';
-      doc.metadata.error = error.message;
-      await doc.save();
-    }
     throw error;
   }
 }
 
-// API Endpoints
-app.post('/api/upload', upload.single('pdf'), async (req, res, next) => {
+// Chat endpoint
+app.post('/api/chat', async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+    const { message } = req.body;
+    const documents = await Document.find({});
+    const context = documents.map(doc => doc.content).join('\n\n');
+    
+    if (!context) {
+      return res.json({ response: "No documents found in knowledge base." });
     }
 
-    const document = new Document({
-      filename: req.file.originalname,
-      metadata: {
-        fileSize: req.file.size,
-        processingStatus: 'pending',
-        processingProgress: 0
-      }
+    const response = await queryOllama(message, context);
+    res.json({ response });
+  } catch (error) {
+    console.error('Error in chat:', error);
+    res.status(500).json({ 
+      error: 'Error processing chat request',
+      message: error.message 
     });
+  }
+});
 
-    await document.save();
-
-    processPDFInChunks(req.file.path, document._id).catch(async (error) => {
-      console.error('PDF processing error:', error);
-      await Document.findByIdAndUpdate(document._id, {
-        'metadata.processingStatus': 'error',
-        'metadata.error': error.message
-      });
-    });
-
+// Test Ollama endpoint
+app.get('/api/test-ollama', async (req, res) => {
+  try {
+    const response = await queryOllama("Test connection", "");
     res.json({ 
-      message: 'PDF upload started. Processing in background.',
-      documentId: document._id,
-      status: 'pending'
+      status: 'success', 
+      message: 'Ollama is working correctly',
+      response: response 
     });
   } catch (error) {
-    next(error);
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Error testing Ollama',
+      error: error.message 
+    });
   }
 });
 
-// Get document statistics
-app.get('/api/stats', async (req, res, next) => {
+// Add this temporary debug endpoint to your Express app
+app.get('/api/debug-slack', async (req, res) => {
   try {
-    const stats = await Document.aggregate([
-      {
-        $group: {
-          _id: null,
-          totalDocuments: { $sum: 1 },
-          completedDocuments: {
-            $sum: {
-              $cond: [{ $eq: ["$metadata.processingStatus", "completed"] }, 1, 0]
-            }
-          },
-          totalPages: { $sum: "$metadata.pageCount" },
-          averageFileSize: { $avg: "$metadata.fileSize" }
-        }
+    const status = {
+      botInitialized: !!slackBot,
+      envVars: {
+        hasToken: !!process.env.SLACK_BOT_TOKEN,
+        hasSigningSecret: !!process.env.SLACK_SIGNING_SECRET,
+        hasAppToken: !!process.env.SLACK_APP_TOKEN
       }
-    ]);
-
-    res.json(stats[0] || {
-      totalDocuments: 0,
-      completedDocuments: 0,
-      totalPages: 0,
-      averageFileSize: 0
-    });
+    };
+    res.json(status);
   } catch (error) {
-    next(error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Search documents
-app.get('/api/search', async (req, res, next) => {
-  try {
-    const { query } = req.query;
-    if (!query) {
-      return res.status(400).json({ error: 'Search query is required' });
-    }
+// Error handling
+app.use(errorHandler);
 
-    const results = await Document.find(
-      { content: { $regex: query, $options: 'i' } },
-      { filename: 1, content: 1, uploadDate: 1 }
-    );
-
-    res.json(results);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Standard CRUD endpoints
-app.get('/api/documents/:id/status', async (req, res, next) => {
-  try {
-    const document = await Document.findById(req.params.id, {
-      metadata: 1,
-      filename: 1,
-      uploadDate: 1
-    });
-
-    if (!document) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    res.json({
-      status: document.metadata.processingStatus,
-      progress: document.metadata.processingProgress,
-      error: document.metadata.error,
-      filename: document.filename,
-      uploadDate: document.uploadDate
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get('/api/documents', async (req, res, next) => {
-  try {
-    const documents = await Document.find({}, {
-      filename: 1,
-      uploadDate: 1,
-      metadata: 1
-    });
-    res.json(documents);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get('/api/documents/:id', async (req, res, next) => {
-  try {
-    const document = await Document.findById(req.params.id);
-    if (!document) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    res.json(document);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.delete('/api/documents/:id', async (req, res, next) => {
-  try {
-    const document = await Document.findByIdAndDelete(req.params.id);
-    if (!document) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    res.json({ message: 'Document deleted successfully' });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Initialize Slack bot
-let slackBot = null;
+// Initialize and start Slack service
+let slackService;
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_SIGNING_SECRET && process.env.SLACK_APP_TOKEN) {
-  slackBot = new App({
-    token: process.env.SLACK_BOT_TOKEN,
-    signingSecret: process.env.SLACK_SIGNING_SECRET,
-    socketMode: true,
-    appToken: process.env.SLACK_APP_TOKEN
-  });
-
-  slackBot.message(async ({ message, say }) => {
-    try {
-      const documents = await Document.find({});
-      const context = documents.map(doc => doc.content).join('\n\n');
-      
-      if (!context) {
-        await say("I don't have any documents in my knowledge base yet. Please upload some PDF documents first.");
-        return;
-      }
-  
-      const response = await queryOllama(message.text, context);
-      await say(response);
-    } catch (error) {
-      console.error('Error processing message:', error);
-      await say('Sorry, I encountered an error processing your request.');
-    }
-  });
-  (async () => {
-    try {
-      await slackBot.start();
-      console.log('⚡️ Slack Bolt app is running!');
-    } catch (error) {
-      console.error('Error starting Slack bot:', error);
-    }
-  })();
+  try {
+    slackService = new SlackService(process.env.SLACK_BOT_TOKEN);
+    await slackService.start();
+  } catch (error) {
+    console.error('Failed to initialize Slack service:', error);
+  }
 } else {
-  console.log('Slack bot not initialized: Missing required environment variables');
+  console.log('Slack service not initialized: Missing required environment variables');
 }
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ 
-    error: 'Something went wrong!',
-    message: err.message 
-  });
-});
-
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
-
-// Start the Express server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// Start server
+app.listen(PORT, async () => {
+  try {
+    await connectDB();
+    console.log(`Server running on port ${PORT}`);
+    
+    console.log("Testing Ollama connection...");
+    try {
+      await queryOllama("Test connection", "");
+      console.log("🤖 Ollama is ready to use");
+    } catch (error) {
+      console.log("⚠️ Warning: Ollama connection failed");
+      console.error("Make sure Ollama is installed and running locally");
+    }
+  } catch (error) {
+    console.error("Server startup error:", error);
+  }
 });

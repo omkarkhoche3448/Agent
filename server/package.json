@@ -10,12 +10,17 @@
     },
     "dependencies": {
         "@slack/bolt": "^3.13.0",
+        "@slack/rtm-api": "^7.0.2",
+        "@slack/web-api": "^7.8.0",
         "cors": "^2.8.5",
-        "dotenv": "^16.0.3",
+        "dotenv": "^16.4.7",
         "express": "^4.18.2",
         "mongoose": "^7.2.3",
         "multer": "^1.4.4",
         "node-fetch": "^3.2.0",
+        "ollama": "^0.5.12",
+        "openai": "^4.79.1",
+        "pdf-parse": "^1.1.1",
         "pdfjs-dist": "^4.10.38"
     },
     "devDependencies": {
