@@ -1,11 +1,15 @@
 import pkg from "@slack/bolt";
 const { App } = pkg;
 import Document from "../models/Document.js";
-import ollama from 'ollama';
+import ollama from "ollama";
 
 export class SlackService {
   constructor(token) {
-    if (!process.env.SLACK_APP_TOKEN || !process.env.SLACK_BOT_TOKEN || !process.env.SLACK_SIGNING_SECRET) {
+    if (
+      !process.env.SLACK_APP_TOKEN ||
+      !process.env.SLACK_BOT_TOKEN ||
+      !process.env.SLACK_SIGNING_SECRET
+    ) {
       throw new Error("Missing required Slack credentials");
     }
 
@@ -20,9 +24,9 @@ export class SlackService {
         retryConfig: {
           minTimeout: 1000,
           maxTimeout: 30000,
-          maxRetries: 10
-        }
-      }
+          maxRetries: 10,
+        },
+      },
     });
 
     this.initializeHandlers();
@@ -32,9 +36,9 @@ export class SlackService {
     try {
       await this.app.start();
       console.log("⚡️ Slack Bolt app is running!");
-      
+
       const authTest = await this.app.client.auth.test();
-      console.log('Bot connected as:', authTest.bot_id);
+      console.log("Bot connected as:", authTest.bot_id);
     } catch (error) {
       console.error("Error starting Slack app:", error);
       throw error;
@@ -42,57 +46,56 @@ export class SlackService {
   }
 
   initializeHandlers() {
-    // Connection event handlers
-    this.app.client.on('connecting', () => {
-      console.log('Connecting to Slack...');
-    });
 
-    this.app.client.on('connected', () => {
-      console.log('Successfully connected to Slack');
-    });
-
-    this.app.client.on('disconnect', () => {
-      console.log('Disconnected from Slack');
-    });
-
-    this.app.client.on('error', (error) => {
-      console.error('Slack connection error:', error);
-    });
-
-    // Message handlers
-    this.app.message('hello', async ({ message, say }) => {
+    this.app.message(/hello|hi|hey|hallow/i, async ({ message, say }) => {
       try {
+        console.log("Received greeting message:", message);
         await say({
-          text: 'Hello there! 👋',
-          thread_ts: message.thread_ts || message.ts
+          text: "Hello there! 👋",
+          thread_ts: message.thread_ts || message.ts,
         });
       } catch (error) {
-        console.error('Error sending response:', error);
+        console.error("Error sending greeting response:", error);
       }
     });
 
+    // Handle all other messages
     this.app.message(async ({ message, say }) => {
-      if (message.text && !message.text.toLowerCase().includes('hello')) {
-        await this.handleMessage(message, say);
+      try {
+        // console.log("Received message:", message);
+        if (
+          message.text &&
+          !message.text.toLowerCase().match(/hello|hi|hey|hallow/i) &&
+          !message.bot_id
+        ) {
+          await this.handleMessage(message, say);
+        }
+      } catch (error) {
+        console.error("Error handling message:", error);
       }
+    });
+
+    this.app.error(async (error) => {
+      console.error("An error occurred in the Slack app:", error);
     });
   }
 
   async queryOllama(question, context) {
     try {
       const response = await ollama.chat({
-        model: 'llama2',
+        model: "llama2",
         messages: [
           {
-            role: 'system',
-            content: `You are a helpful assistant that answers questions based on the provided context. Only answer using information from the context provided.`
+            role: "system",
+            content: `You are a helpful assistant that answers questions based on the provided context.
+             Only answer using information from the context provided.`,
           },
           {
-            role: 'user',
-            content: `Context: ${context}\n\nQuestion: ${question}`
-          }
+            role: "user",
+            content: `Context: ${context}\n\nQuestion: ${question}`,
+          },
         ],
-        stream: false
+        stream: false,
       });
 
       return response.message.content;

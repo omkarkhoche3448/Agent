@@ -13,7 +13,6 @@ const pdfjsWorkerPath = path.join(__dirname, '../node_modules/pdfjs-dist/build/p
 pdfjs.GlobalWorkerOptions.workerSrc = `file://${pdfjsWorkerPath}`;
 
 
-// In your pdfService.js or where processPDFInChunks is defined
 export async function processPDFInChunks(filePath, documentId) {
   try {
     const doc = await Document.findById(documentId);

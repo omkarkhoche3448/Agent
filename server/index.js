@@ -13,8 +13,6 @@ import ollama from 'ollama';
 import dns from 'dns';
 
 dotenv.config();
-
-// Set Google DNS servers
 dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 const app = express();
@@ -96,23 +94,6 @@ app.get('/api/test-ollama', async (req, res) => {
   }
 });
 
-// Add this temporary debug endpoint to your Express app
-app.get('/api/debug-slack', async (req, res) => {
-  try {
-    const status = {
-      botInitialized: !!slackBot,
-      envVars: {
-        hasToken: !!process.env.SLACK_BOT_TOKEN,
-        hasSigningSecret: !!process.env.SLACK_SIGNING_SECRET,
-        hasAppToken: !!process.env.SLACK_APP_TOKEN
-      }
-    };
-    res.json(status);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // Error handling
 app.use(errorHandler);
 
@@ -120,13 +101,18 @@ app.use(errorHandler);
 let slackService;
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_SIGNING_SECRET && process.env.SLACK_APP_TOKEN) {
   try {
+    console.log('Initializing Slack service...');
     slackService = new SlackService(process.env.SLACK_BOT_TOKEN);
     await slackService.start();
+    console.log('Slack service initialized successfully');
   } catch (error) {
     console.error('Failed to initialize Slack service:', error);
   }
 } else {
-  console.log('Slack service not initialized: Missing required environment variables');
+  console.log('Missing Slack environment variables:');
+  console.log('SLACK_BOT_TOKEN:', !!process.env.SLACK_BOT_TOKEN);
+  console.log('SLACK_SIGNING_SECRET:', !!process.env.SLACK_SIGNING_SECRET);
+  console.log('SLACK_APP_TOKEN:', !!process.env.SLACK_APP_TOKEN);
 }
 
 // Start server
