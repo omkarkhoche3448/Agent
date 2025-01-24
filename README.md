@@ -1,5 +1,5 @@
 
-# AI-Powered Slack Bot and Document Interaction Platform  
+# AI-Powered Slack Bot
 
 A platform that integrates AI-powered Slack bot functionalities and document management, leveraging **MongoDB** for storage and **Ollama** for AI-generated responses.  
 
